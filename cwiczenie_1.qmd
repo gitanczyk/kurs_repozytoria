@@ -1,0 +1,141 @@
+---
+title: "Ćwiczenie 1 (tidymodels)"
+author: "Jakub Anczyk"
+format: html
+editor: visual
+---
+
+```{r}
+#| eval: true
+#| echo: false
+#| output: false
+#| warning: false
+#| error: false
+#| include: false
+
+setwd("D:/Kursy/Kurs Repozytoria/Cwiczenia/3_modelowanie/cwiczenie_1")
+```
+
+## Załadowanie bibliotek
+
+```{r}
+library(dplyr)
+library(tidymodels)
+library(parsnip)
+library(readr)       # import danych
+library(broom.mixed) # konwersja 
+library(dotwhisker)  # wizualizacja
+library(rstanarm)
+```
+
+## Załadowanie danych
+
+Załadowanie danych następuje z zestawu airquality.
+
+```{r}
+colnames(airquality) <- tolower(colnames(airquality))
+
+air <-
+  airquality |>
+  as_tibble() |>
+  na.omit() |> 
+  select(-day) |> 
+  mutate(month = factor(month)) 
+
+print(air)
+```
+
+## Cyszczenie danych
+
+Zestaw nie wymaga usnunięcia braków w danych, ponieważ nie występują.
+
+```{r}
+air |> is.na() |> as_tibble() |> summarise_all(sum)
+```
+
+## Analiza danych
+
+```{r}
+
+air |> str()
+air |> summary()
+
+air %>%
+  ggplot(aes(
+    x = solar.r,
+    y = ozone,
+    col = month,
+    group = month
+  )) +
+  geom_point() +
+  geom_smooth(method = lm, se = F) +
+  scale_color_viridis_d(option = "C", end = .9)
+```
+## Budowa modelu
+
+W poniższym kodzie utworzono model szacujący temperaturę na podstawie zmiennych oznaczających poziom ozonu w atmosferze, promieniowania słonecznego oraz wiatru.
+
+```{r}
+
+linear_reg() |> 
+  set_engine("keras")
+
+lm_mod <- 
+  linear_reg() |> 
+  set_engine("lm")
+
+lm_fit <-  
+  lm_mod |>
+  fit(temp ~ ozone * solar.r * wind, data = air)
+
+lm_fit  
+lm_fit |> tidy(conf.int = T)
+```
+
+## Analiza przedziałów ufności dopasowania modelu
+
+Z analizy wykresu przedstawiającego przedziały ufności dla istotności każdej ze zmiennych wynika, że wiatr wydaje się mieć największe znaczenie dla szacowania wartości temperatury. 
+
+Zgodnie z podsumowaniem modelu wzrost siły wiatru o jedną jednostkę powoduje zmianę temperatury o -0.632 stopnia. 
+
+```{r}
+lm_fit |> 
+  tidy() |> 
+  dwplot(vline = geom_vline(xintercept = 0, color = "grey50", linetype = 2), 
+         dot_args = list(size = 2, color = "black"), 
+         whisker_args = list(color = "black")) +
+  theme_bw()
+```
+
+## Prognozowanie
+
+do uzupełnienia
+
+```{r}
+
+new_points <- expand.grid(ozone = seq(170, 300, 20),
+                          solar.r = seq(340, 400, 15),
+                          wind = seq(20, 100, 20))
+
+mean_pred <- predict(object = lm_fit, new_data = new_points)
+conf_pred <- predict(object = lm_fit, new_data = new_points, type = "conf_int")
+
+lm_pred <- 
+  new_points |> 
+  bind_cols(mean_pred) |> 
+  bind_cols(conf_pred)
+
+lm_pred |>
+  ggplot(aes(x = wind,
+             y = .pred)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = .pred_lower,
+                    ymax = .pred_upper),
+                width = 0.2) +
+  facet_wrap(~ wind) +
+  theme_bw() +
+  labs(y = "temperature")
+
+```
+
+
