@@ -1,0 +1,213 @@
+---
+title: "Ćwiczenie 1 (tidymodels)"
+author: "Jakub Anczyk"
+format: html
+editor: visual
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+#| eval: true
+#| echo: false
+#| output: false
+#| warning: false
+#| error: false
+#| include: false
+
+setwd("D:/Kursy/Kurs Repozytoria/Cwiczenia/3_modelowanie/cwiczenie_1")
+```
+
+```{r}
+#| eval: true
+#| echo: false
+#| output: false
+#| warning: false
+#| error: false
+#| include: false
+
+library(dplyr)
+library(tidymodels)
+library(parsnip)
+library(readr)       # import danych
+library(broom.mixed) # konwersja 
+library(dotwhisker)  # wizualizacja
+library(rstanarm)
+library(GGally)
+```
+
+## Załadowanie danych
+
+Załadowanie danych następuje z zestawu airquality.
+
+```{r}
+colnames(airquality) <- tolower(colnames(airquality))
+
+air <-
+  airquality |>
+  as_tibble() |>
+  na.omit() |> 
+  select(-day) |> 
+  mutate(month = factor(month)) 
+
+print(air)
+```
+
+## Czyszczenie danych
+
+Zestaw nie wymaga usunięcia braków w danych, ponieważ nie występują.
+
+```{r}
+air |> is.na() |> as_tibble() |> summarise_all(sum)
+```
+
+## Analiza danych
+
+```{r}
+
+air |> str()
+air |> summary()
+ggcorr(air, palette = "RdBu", label = TRUE)
+
+air %>%
+  ggplot(aes(
+    x = ozone,
+    y = temp,
+    col = month,
+    group = month
+  )) +
+  geom_point() +
+  geom_smooth(method = lm, se = F) +
+  scale_color_viridis_d(option = "C", end = .9)
+
+```
+
+## Selekcja zmiennych
+
+W poniższym kodzie, przy pomocy funkcji wykonującej algorytm Hellwiga, porównano dla każdej ze zmiennych w zestawie wszystkie potencjalne kombinacje zmiennych objaśniających. W kodzie wykorzystano funkcję hellwig() pobraną z [github](https://rdrr.io/github/mbojan/mbstats/src/R/hellwig.R).
+
+W wyniku wybrano następującą kombinację do dalszej analizy z uwagi na największą pojemność informacyjną zmiennych objasniających:
+
+$\text{ozone} = (X_1 × \text{solar.r}) + (X_2 × \text{wind}) + (X_3 × \text{temp})$
+
+```{r}
+
+hellwig <- function(y, x, method = "pearson") {
+  requireNamespace("utils")
+  
+  # Ensure 'x' is numeric
+  x <- x[sapply(x, is.numeric)]
+  
+  x <- as.data.frame(x)
+  
+  # Calculate correlation matrix
+  cm <- stats::cor(x, method = method)
+  cd <- stats::cor(x, y, method = method)
+
+  k <- sapply(seq(2, ncol(x)), function(i) utils::combn(ncol(x), i, simplify = FALSE))
+  k <- do.call("c", k)
+
+  hfun <- function(v) {
+    sapply(v, function(i) cd[i]^2 / sum(abs(cm[v, i])))
+  }
+  
+  h <- sapply(k, hfun)
+  
+  result <- data.frame(
+    k = sapply(k, function(comb) paste(names(x)[comb], collapse = "-")),
+    h = sapply(h, sum),
+    stringsAsFactors = FALSE
+  )
+  
+  result[which.max(result$h), ]
+}
+
+# Generalized loop for all target variables
+target_vars <- c("wind", "ozone", "solar.r", "temp")
+predictor_sets <- lapply(target_vars, function(var) setdiff(names(air), var))
+
+# Ensure all predictors are numeric
+numeric_predictors <- lapply(predictor_sets, function(predictors) {
+  predictors[sapply(air[predictors], is.numeric)]
+})
+
+# Generate models dynamically for all target variables
+models <- lapply(seq_along(target_vars), function(i) {
+  best_model <- hellwig(air[[target_vars[i]]], air[, numeric_predictors[[i]]], method = "pearson")
+  best_model$target <- target_vars[i]
+  best_model
+})
+
+# Combine the results into one data frame
+combined_models <- do.call(rbind, models)
+names(combined_models) <- c("k", "h", "target")
+print(combined_models)
+```
+
+## Budowa modelu
+
+W poniższym kodzie utworzono model szacujący ilość ozonu w atmosferze na podstawie zmiennych oznaczających ilość promieniowania słonecznego, wiatru i temperatury. Badanie istotności zmiennych wykazało, że każda z dobranych zmiennych jest istotna dla modelu na poziomie istotności poniżej 0.01.
+
+```{r}
+
+linear_reg() |> 
+  set_engine("keras")
+
+lm_mod <- 
+  linear_reg() |> 
+  set_engine("lm")
+
+lm_fit <-  
+  lm_mod |>
+  fit(ozone ~ temp + solar.r +wind, data = air)
+
+# lm_fit  
+# lm_fit |> tidy(conf.int = T)
+lm_fit$fit |> summary()
+```
+
+## Analiza przedziałów ufności dopasowania modelu
+
+Z analizy wykresu przedstawiającego przedziały ufności dla istotności każdej ze zmiennych wynika, że wiatr oraz temperatura mają największy wpływ na poziom ozonu (ceteris paribus).
+
+```{r}
+lm_fit |> 
+  tidy() |> 
+  dwplot(vline = geom_vline(xintercept = 0, color = "grey50", linetype = 2), 
+         dot_args = list(size = 2, color = "black"), 
+         whisker_args = list(color = "black")) +
+  theme_bw()
+```
+
+## Prognozowanie
+
+Z zaprezentowanej prognozy wynika, że wzrost temperatury prognoza powoduje wzrost ilości ozonu w atmosferze. Jednocześnie wzrost prędkości wiatru obniża jego poziom.
+
+Należy jednak zauważyć, że model zwraca także wartości ujemne w przypadku skrajnych wartości (np. dla prędkości wiatru na poziomie 100 km/h oraz temperatury a poziomie 100°C). Model należy zatem poddać dalszej analizie lub rozszerzyć zestaw uczący o dodatkowe obserwacje.
+
+```{r}
+
+new_points <- expand.grid(temp = seq(100, 200, 20),
+                          solar.r = seq(340, 400, 15),
+                          wind = seq(20, 100, 20))
+
+mean_pred <- predict(object = lm_fit, new_data = new_points)
+conf_pred <- predict(object = lm_fit, new_data = new_points, type = "conf_int")
+
+lm_pred <- 
+  new_points |> 
+  bind_cols(mean_pred) |> 
+  bind_cols(conf_pred)
+
+lm_pred |>
+  ggplot(aes(x = temp,
+             y = .pred)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = .pred_lower,
+                    ymax = .pred_upper),
+                width = 0.2) +
+  facet_wrap(~ wind) +
+  theme_bw() +
+  labs(y = "ozone")
+
+```

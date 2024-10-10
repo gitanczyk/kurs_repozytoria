@@ -1,0 +1,21 @@
+PS C:\Users\kubba> git clone https://github.com/kubbajb/kurs_repozytoria.git
+Cloning into 'kurs_repozytoria'...
+warning: You appear to have cloned an empty repository.
+PS C:\Users\kubba> cd kurs_repozytoria
+PS C:\Users\kubba\kurs_repozytoria> git checkout -b pierwszy_submit
+Switched to a new branch 'pierwszy_submit'
+PS C:\Users\kubba\kurs_repozytoria> git add .
+PS C:\Users\kubba\kurs_repozytoria> git commit -m "..."
+[pierwszy_submit (root-commit) 10c18d5] ...
+ 1 file changed, 141 insertions(+)
+ create mode 100644 cwiczenie_1.qmd
+PS C:\Users\kubba\kurs_repozytoria> git push origin pierwszy_submit
+Enumerating objects: 3, done.
+Counting objects: 100% (3/3), done.
+Delta compression using up to 8 threads
+Compressing objects: 100% (2/2), done.
+Writing objects: 100% (3/3), 1.53 KiB | 1.53 MiB/s, done.
+Total 3 (delta 0), reused 0 (delta 0), pack-reused 0
+To https://github.com/kubbajb/kurs_repozytoria.git
+ * [new branch]      pierwszy_submit -> pierwszy_submit
+PS C:\Users\kubba\kurs_repozytoria>
