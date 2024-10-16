@@ -1,0 +1,292 @@
+---
+title: "Ćwiczenie 2 (tidymodels)"
+author: "Jakub Anczyk"
+format: html
+editor: visual
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+#| eval: true
+#| echo: false
+#| output: false
+#| warning: false
+#| error: false
+#| include: false
+
+setwd("D:/Kursy/Kurs Repozytoria/Cwiczenia/3_modelowanie/cwiczenie_2")
+```
+
+```{r}
+#| eval: true
+#| echo: false
+#| output: false
+#| warning: false
+#| error: false
+#| include: false
+
+library(dplyr)
+library(tidymodels)
+library(parsnip)
+library(readr)       # import danych
+library(broom.mixed) # konwersja 
+library(dotwhisker)  # wizualizacja
+library(rstanarm)
+library(GGally)
+library(openair)
+library(skimr)
+library(nycflights13)
+library(tidymodels)
+library(ggpubr)
+tidymodels_prefer()
+```
+
+## Sprawdzenie opisu danych
+
+Pobieranie danych i ich wstępna analiza.
+
+```{r}
+air <- mydata |> selectByDate(year = 2002) 
+air |> skim()
+```
+
+```{r}
+air <- air |> na.omit()
+```
+
+## Wizualizacja zmiennych NOx i NO2
+Porównanie korelacji pomiędzy zmiennymi NOx i NO2 na podstawie próby 300 obserwacji.
+
+```{r}
+set.seed(222)
+air[sample(1:nrow(air), size = 300, replace = F),] |> 
+  select(nox, no2) |> 
+  ggpairs()
+```
+
+## Wykres punktowy z linią regresji
+Wizualizacja regresji liniowej dla zmiennych NOx i NO2.
+
+```{r}
+set.seed(222)
+air[sample(1:nrow(air), size = 300, replace = F),] |> 
+  select(nox, no2) |> 
+  ggplot(aes(nox, no2)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = T, formula = y ~ x) + 
+  stat_cor(label.x = 220, label.y = 20) + 
+  stat_regline_equation(label.x = 200, label.y = 15) +
+  theme_bw()
+```
+
+## Wykres stężenia ozonu w czasie
+Wykres liniowy przedstawiający zmienność poziomu ozonu w czasie.
+
+```{r}
+air |>    
+  ggplot(aes(date, o3)) +     
+  geom_line() +     
+  theme_bw()
+```
+
+## Zakres wartości O3
+Obliczenie zakresu wartości zmiennej O3.
+
+```{r}
+air |> 
+  pull(o3) |> 
+  range()  
+```
+
+## Liczba kombinacji zmiennych predykcyjnych
+Obliczenie liczby możliwych kombinacji zmiennych predykcyjnych.
+
+```{r}
+(kombinacje <- (2^length(setdiff(names(air %>% select(-date)), "o3"))) - 1)
+```
+
+## Algorytm Hellwiga
+Implementacja algorytmu Hellwiga dla wyboru najlepszego modelu predykcyjnego.
+
+```{r}
+
+hellwig <- function(y, x, method = "pearson") {
+  requireNamespace("utils")
+  x <- x[sapply(x, is.numeric)]  # Ensure only numeric predictors
+  x <- as.data.frame(x)  # Convert to data frame
+  
+  # Calculate correlation matrix
+  cm <- stats::cor(x, method = method)  # Correlations between predictors
+  cd <- stats::cor(x, y, method = method)  # Correlation between predictors and target
+  
+  # Generate all subsets of the predictors
+  k <- sapply(seq(2, ncol(x)), function(i) utils::combn(ncol(x), i, simplify = FALSE))
+  k <- do.call("c", k)
+  
+  # Hellwig function to calculate score for a subset
+  hfun <- function(v) {
+    sapply(v, function(i) cd[i]^2 / sum(abs(cm[v, i])))
+  }
+  
+  # Store all combinations and their respective scores
+  all_combinations <- lapply(k, function(comb) {
+    score <- sum(hfun(comb))
+    list(combination = paste(names(x)[comb], collapse = "-"), score = score)
+  })
+  
+  # Convert to data frame for easy viewing
+  all_combinations_df <- data.frame(
+    combination = sapply(all_combinations, `[[`, "combination"),
+    score = sapply(all_combinations, `[[`, "score"),
+    stringsAsFactors = FALSE
+  )
+  
+  # Return the data frame of all combinations and their scores
+  return(all_combinations_df)
+}
+
+target_var <- c("o3")
+predictor_sets <- setdiff(names(air %>% select(-date)), target_var)
+
+predictor_data <- air[, predictor_sets]
+target_data <- air[[target_var]]
+
+all_models <- hellwig(target_data, predictor_data, method = "pearson")
+best_model <- all_models |> slice(which.max(score))
+best_model
+```
+
+## Klasyfikacja poziomu ozonu
+Klasyfikacja wartości ozonu na kategorie: "Niskie" i "Wysokie" oraz zawężenie liczby kolumn do podzbioru z najlepszym wynikiem pojemności informacyjnej według metody Hellwiga.
+
+```{r}
+air <-
+  air |>
+  mutate(ozone = cut(
+    o3,
+    breaks = c(-0.1, 10, 53),
+    labels = c("Niskie", "Wysokie")
+  )) |> 
+  select(c(ozone, ws, nox))
+```
+
+## Licznik wartości ozonu
+Obliczenie liczby przypadków i proporcji dla poziomu ozonu.
+
+```{r}
+air |> 
+  count(ozone) |>
+  mutate(prop = n/sum(n))
+```
+
+## Ponowna analiza danych
+Przegląd i podsumowanie danych po klasyfikacji.
+
+```{r}
+air |>
+  skimr::skim()
+```
+
+## Podział danych
+Podział danych na zbiór treningowy i testowy.
+
+```{r}
+set.seed(222)
+data_split <- initial_split(data = air, prop = 3/4)
+train_data <- training(data_split)
+test_data <-  testing(data_split)
+```
+
+## Receptura i rola
+Definicja receptury przekształceń zmiennych w modelu.
+
+```{r}
+air_rec <-
+  recipe(ozone ~., data = train_data)
+```
+
+## Przygotowanie danych do trenowania
+Wstępne przekształcenie danych treningowych.
+
+```{r}
+air_rec |> prep() |> bake(train_data) |> _[1:10,] |> DT::datatable()
+```
+
+```{r}
+air_rec |> prep()
+```
+
+## Model regresji logistycznej
+Utworzenie modelu regresji logistycznej.
+
+```{r}
+lr_mod <- 
+  logistic_reg() |> 
+  set_engine("glm")
+```
+
+## Praca z przepływem danych
+Zdefiniowanie przepływu danych w celu trenowania modelu.
+
+```{r}
+logi_work <- 
+  workflow() |> 
+  add_model(lr_mod) |> 
+  add_recipe(air_rec)
+
+logi_work
+```
+
+## Trenowanie modelu
+Trenowanie modelu na danych treningowych.
+
+```{r}
+logi_fit <-  
+  logi_work |> 
+  fit(data = train_data)
+```
+
+## Wyciągnięcie parametrów modelu
+Ekstrakcja parametrów dopasowanego modelu.
+
+```{r}
+logi_fit |> 
+  extract_fit_parsnip() |> 
+  tidy()
+```
+
+## Ekstrakcja przepisu
+Wyciągnięcie przepisu z dopasowanego modelu.
+
+```{r}
+logi_fit |> 
+  extract_recipe()
+```
+
+## Predykcja na danych testowych
+Predykcja wartości na podstawie zbioru testowego.
+
+```{r}
+pred_test <- 
+  augment(logi_fit, test_data)
+
+pred_test
+```
+
+## Krzywa ROC
+Wizualizacja krzywej ROC dla wyników predykcji.
+
+```{r}
+pred_test  |> 
+  roc_curve(truth = ozone, .pred_Niskie) |> 
+  autoplot()
+```
+
+## Pole pod krzywą ROC
+Obliczenie pola pod krzywą ROC dla wyników predykcji.
+
+```{r}
+pred_test |> 
+  roc_auc(truth = ozone, .pred_Niskie)
+```

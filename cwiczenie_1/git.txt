@@ -1,0 +1,28 @@
+cd "D:\Kursy\Kurs Repozytoria\Cwiczenia\3_modelowanie\kurs_repozytoria"
+Changes the current directory to the specified folder on your system:
+D:\Kursy\Kurs Repozytoria\Cwiczenia\3_modelowanie\kurs_repozytoria.
+This is the location where you want to work on your repository.
+
+git clone https://github.com/kubbajb/kurs_repozytoria.git
+Clones (copies) the remote Git repository from the provided URL (https://github.com/kubbajb/kurs_repozytoria.git) to your local machine.
+It creates a folder named kurs_repozytoria inside your current directory and downloads all files and history from the repository.
+
+cd kurs_repozytoria
+Changes the current directory to the newly cloned kurs_repozytoria folder.
+You are now inside the repository's working directory.
+
+git checkout -b trzeci_submit
+Creates a new branch called trzeci_submit and switches to it.
+This is useful for creating a separate workspace to work on a new feature or submit without affecting the main or master branch.
+
+git add .
+Adds all the changes (new, modified, or deleted files) in the current directory to the staging area, preparing them for the next commit.
+The dot (.) represents the current directory, meaning all files inside it.
+
+git commit -m "trzeci_submit"
+Commits the staged changes to the local Git repository with a message "trzeci_submit".
+This creates a snapshot of the current state of your project with the provided description.
+
+git push origin trzeci_submit
+Pushes (uploads) your local trzeci_submit branch and its commits to the remote repository on GitHub (the remote origin).
+This makes your changes available for others (or yourself) on GitHub.
