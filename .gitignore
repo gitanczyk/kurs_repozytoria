@@ -1,0 +1,9 @@
+# Ignore Quarto temporary rendering files
+/.quarto/
+
+# Ignore all HTML files
+*.html
+
+# (Optional) Ignore the HTML resources folder if it exists
+*_files/
+*_cache/
