@@ -43,8 +43,8 @@ execute:
 #| warning: false
 #| error: false
 #| include: false
-
-setwd("D:/Kursy/Kurs Repozytoria/Cwiczenia/3_modelowanie/cwiczenie_1")
+# Proszę nie ustawiać, ale dymyślnie zakłądac plik projektu w folderze roboczym
+# setwd("D:/Kursy/Kurs Repozytoria/Cwiczenia/3_modelowanie/cwiczenie_1")
 ```
 
 ```{r}
@@ -113,9 +113,11 @@ air %>%
 
 ## Selekcja zmiennych
 
+Pozytywne zaskoczenie :) Skąd pan znał ta metodę o opracowaną przez Polskiego Naukowca z wrocławia.
+
 W poniższym kodzie, przy pomocy funkcji wykonującej algorytm Hellwiga, porównano dla każdej ze zmiennych w zestawie wszystkie potencjalne kombinacje zmiennych objaśniających. W kodzie wykorzystano funkcję hellwig() pobraną z [github](https://rdrr.io/github/mbojan/mbstats/src/R/hellwig.R).
 
-W wyniku wybrano następującą kombinację do dalszej analizy z uwagi na największą pojemność informacyjną zmiennych objasniających:
+W wyniku wybrano następującą kombinację do dalszej analizy z uwagi na największą pojemność informacyjną zmiennych objaśniających:
 
 $\text{ozone} = (X_1 × \text{solar.r}) + (X_2 × \text{wind}) + (X_3 × \text{temp})$
 
@@ -213,6 +215,12 @@ lm_fit |>
 Z zaprezentowanej prognozy wynika, że wzrost temperatury prognoza powoduje wzrost ilości ozonu w atmosferze. Jednocześnie wzrost prędkości wiatru obniża jego poziom.
 
 Należy jednak zauważyć, że model zwraca także wartości ujemne w przypadku skrajnych wartości (np. dla prędkości wiatru na poziomie 100 km/h oraz temperatury a poziomie 100°C). Model należy zatem poddać dalszej analizie lub rozszerzyć zestaw uczący o dodatkowe obserwacje.
+
+Jest w tym trochę prawdy. Tak metoda ma wady. Ale ...
+
+Proponuję podać zakres zastosowania modelu. Pedkość wiatru modelu zdefiniowana jest w **\[m/s\]** a nie `[km/h]`. W efekcie otrzymał pan irracjonalne wyniki dla nierealnej sytuacji.
+
+100 \[m/s\] to \`r 100 \* 3.6\` \[km/h\]  - gdzieś w środku tornada takie prędkości występują.
 
 ```{r}
 
