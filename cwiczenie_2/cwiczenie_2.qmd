@@ -44,7 +44,7 @@ execute:
 #| error: false
 #| include: false
 
-setwd("D:/Kursy/Kurs Repozytoria/Cwiczenia/3_modelowanie/cwiczenie_2")
+# setwd("D:/Kursy/Kurs Repozytoria/Cwiczenia/3_modelowanie/cwiczenie_2")
 ```
 
 ```{r}
@@ -85,6 +85,7 @@ air <- air |> na.omit()
 ```
 
 ## Wizualizacja zmiennych NOx i NO2
+
 Porównanie korelacji pomiędzy zmiennymi NOx i NO2 na podstawie próby 300 obserwacji.
 
 ```{r}
@@ -95,6 +96,7 @@ air[sample(1:nrow(air), size = 300, replace = F),] |>
 ```
 
 ## Wykres punktowy z linią regresji
+
 Wizualizacja regresji liniowej dla zmiennych NOx i NO2.
 
 ```{r}
@@ -110,6 +112,7 @@ air[sample(1:nrow(air), size = 300, replace = F),] |>
 ```
 
 ## Wykres stężenia ozonu w czasie
+
 Wykres liniowy przedstawiający zmienność poziomu ozonu w czasie.
 
 ```{r}
@@ -120,6 +123,7 @@ air |>
 ```
 
 ## Zakres wartości O3
+
 Obliczenie zakresu wartości zmiennej O3.
 
 ```{r}
@@ -129,6 +133,7 @@ air |>
 ```
 
 ## Liczba kombinacji zmiennych predykcyjnych
+
 Obliczenie liczby możliwych kombinacji zmiennych predykcyjnych.
 
 ```{r}
@@ -136,6 +141,7 @@ Obliczenie liczby możliwych kombinacji zmiennych predykcyjnych.
 ```
 
 ## Algorytm Hellwiga
+
 Implementacja algorytmu Hellwiga dla wyboru najlepszego modelu predykcyjnego.
 
 ```{r}
@@ -186,7 +192,10 @@ best_model <- all_models |> slice(which.max(score))
 best_model
 ```
 
+Metoda nie odpowiednia dla klasyfikacji.
+
 ## Klasyfikacja poziomu ozonu
+
 Klasyfikacja wartości ozonu na kategorie: "Niskie" i "Wysokie" oraz zawężenie liczby kolumn do podzbioru z najlepszym wynikiem pojemności informacyjnej według metody Hellwiga.
 
 ```{r}
@@ -201,6 +210,7 @@ air <-
 ```
 
 ## Licznik wartości ozonu
+
 Obliczenie liczby przypadków i proporcji dla poziomu ozonu.
 
 ```{r}
@@ -210,6 +220,7 @@ air |>
 ```
 
 ## Ponowna analiza danych
+
 Przegląd i podsumowanie danych po klasyfikacji.
 
 ```{r}
@@ -218,6 +229,7 @@ air |>
 ```
 
 ## Podział danych
+
 Podział danych na zbiór treningowy i testowy.
 
 ```{r}
@@ -228,7 +240,14 @@ test_data <-  testing(data_split)
 ```
 
 ## Receptura i rola
+
 Definicja receptury przekształceń zmiennych w modelu.
+
+Proszę na podstawie daty utworzyć dodatkowe nowe zmienne,
+
+W poleceniu jest napisane, jakie kombinacje należy sprawdzić modelowania, niestety nie da się tego zrobić na skróty. Ponieważ chcę byście napisali kilka kombinacji receptur i sprawdzili, która jest najlepsza.
+
+Brak zmiennych jakościowych w zestawie danych.
 
 ```{r}
 air_rec <-
@@ -236,6 +255,7 @@ air_rec <-
 ```
 
 ## Przygotowanie danych do trenowania
+
 Wstępne przekształcenie danych treningowych.
 
 ```{r}
@@ -247,6 +267,7 @@ air_rec |> prep()
 ```
 
 ## Model regresji logistycznej
+
 Utworzenie modelu regresji logistycznej.
 
 ```{r}
@@ -256,6 +277,7 @@ lr_mod <-
 ```
 
 ## Praca z przepływem danych
+
 Zdefiniowanie przepływu danych w celu trenowania modelu.
 
 ```{r}
@@ -268,6 +290,7 @@ logi_work
 ```
 
 ## Trenowanie modelu
+
 Trenowanie modelu na danych treningowych.
 
 ```{r}
@@ -277,6 +300,7 @@ logi_fit <-
 ```
 
 ## Wyciągnięcie parametrów modelu
+
 Ekstrakcja parametrów dopasowanego modelu.
 
 ```{r}
@@ -286,6 +310,7 @@ logi_fit |>
 ```
 
 ## Ekstrakcja przepisu
+
 Wyciągnięcie przepisu z dopasowanego modelu.
 
 ```{r}
@@ -294,6 +319,7 @@ logi_fit |>
 ```
 
 ## Predykcja na danych testowych
+
 Predykcja wartości na podstawie zbioru testowego.
 
 ```{r}
@@ -304,6 +330,7 @@ pred_test
 ```
 
 ## Krzywa ROC
+
 Wizualizacja krzywej ROC dla wyników predykcji.
 
 ```{r}
@@ -313,9 +340,12 @@ pred_test  |>
 ```
 
 ## Pole pod krzywą ROC
+
 Obliczenie pola pod krzywą ROC dla wyników predykcji.
 
 ```{r}
 pred_test |> 
   roc_auc(truth = ozone, .pred_Niskie)
 ```
+
+Wynik bardzo dobry, ale można osiągnąć więcej około 0.96
