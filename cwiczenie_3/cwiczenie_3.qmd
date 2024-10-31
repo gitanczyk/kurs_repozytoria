@@ -1,0 +1,466 @@
+---
+title: "Ćwiczenie 2 (tidymodels)"
+author: "Jakub Anczyk"
+editor: visual
+editor_options: 
+  chunk_output_type: console
+format: 
+  html:
+    toc: true
+    toc-depth: 3
+    toc-location: right
+    toc-title: Spis Treści
+    number-sections: true
+    number-depth: 3
+    embed-resources: true
+    html-math-method: katex
+    code-tools: true
+    code-block-bg: true
+    code-fold: show
+    code-summary: "Show and hide code"
+    link-external-icon: true
+    link-external-newwindow: true
+    smooth-scroll: true
+    self-contained: true
+    citation: true
+    theme: 
+        dark: solar
+        light: flatly
+    fontsize: 1.0em
+    linestretch: 1.3
+    fig-align: center
+execute: 
+  echo: true
+  error: false
+  warning: false
+  output: true
+---
+
+## Załadowanie i wstępna transformacja danych
+
+```{r}
+#| eval: true
+#| echo: false
+#| output: false
+#| warning: false
+#| error: false
+#| include: false
+
+PackageNames <- c("dplyr", "tidymodels", "parsnip", "readr", "broom.mixed", "dotwhisker", 
+                  "rstanarm", "GGally", "openair", "skimr", "nycflights13", "ggpubr", 
+                  "leaps", "MASS")
+
+install_if_missing <- function(pkg) {
+  if (!requireNamespace(pkg, quietly = TRUE)) {
+    install.packages(pkg, dependencies = TRUE)
+  }
+}
+
+lapply(PackageNames, install_if_missing)
+lapply(PackageNames, library, character.only = TRUE)
+
+tidymodels_prefer()
+Sys.setenv(LANG = "en")
+
+```
+
+### Sprawdzenie opisu danych
+
+Pobieranie danych i ich wstępna analiza.
+
+```{r}
+air <- mydata |> selectByDate(year = 2002) |> na.omit()
+air |> skim()
+```
+
+### Wizualizacja zmiennych NOx i NO2
+
+Porównanie korelacji pomiędzy zmiennymi NOx i NO2 na podstawie próby 300 obserwacji.
+
+```{r}
+set.seed(222)
+air[sample(1:nrow(air), size = 300, replace = F),] |> 
+  select(nox, no2) |> 
+  ggpairs()
+```
+
+### Wykres punktowy z linią regresji
+
+Wizualizacja regresji liniowej dla zmiennych NOx i NO2.
+
+```{r}
+set.seed(222)
+air[sample(1:nrow(air), size = 300, replace = F),] |> 
+  select(nox, no2) |> 
+  ggplot(aes(nox, no2)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = T, formula = y ~ x) + 
+  stat_cor(label.x = 220, label.y = 20) + 
+  stat_regline_equation(label.x = 200, label.y = 15) +
+  theme_bw()
+```
+
+### Wykres stężenia ozonu w czasie
+
+Wykres liniowy przedstawiający zmienność poziomu ozonu w czasie.
+
+```{r}
+air |>    
+  ggplot(aes(date, o3)) +     
+  geom_line() +     
+  theme_bw()
+```
+
+### Zakres wartości O3
+
+Obliczenie zakresu wartości zmiennej O3.
+
+```{r}
+air |> 
+  pull(o3) |> 
+  range()  
+```
+
+### Klasyfikacja poziomu ozonu
+
+Klasyfikacja wartości ozonu na kategorie: "Niskie" i "Wysokie".
+
+```{r}
+air <-
+  air |>
+  mutate(ozone = cut(
+    o3,
+    breaks = c(-0.1, 10, 53),
+    labels = c("Niskie", "Wysokie")
+  )) |>
+  select(-o3)
+```
+
+### Podział danych
+
+Podział danych na zbiór treningowy i testowy.
+
+```{r}
+set.seed(222)
+data_split <- initial_split(data = air, prop = 3/4)
+train_data <- training(data_split)
+test_data <-  testing(data_split)
+
+set.seed(345)
+folds_cv_v10 <- vfold_cv(data = train_data, v = 10)
+folds_cv_v10_r5 <- vfold_cv(data = train_data, v = 10, repeats = 5)
+folds_boot_t5 <- bootstraps(data = train_data, times = 5)
+
+```
+
+## Budowa modelu regresji logistycznej
+
+### Selekcja zmiennych za pomocą biblioteki caret
+
+Przy pomocy biblioteki caret zidentyfikowano w zestawie silnie skorelowane między sobą zmienne, za punkt odcięcia uznając wartość bezwzględną korelacji na poziomie 0.5 lub wyższym. Zmienne te zostaną na etapie tworzenia receptury zdefiniowane jako kolumny typu "ID".
+
+```{r}
+library(caret)
+library(forcats)
+
+dummifieddata <- air |> 
+  mutate(date = as.numeric(date)) |> 
+  select(-c(date, ozone))
+
+# identyfikacja zmiennych o zerowej wariancji
+descrCor <-  cor(dummifieddata)
+highCorr <- sum(abs(descrCor[upper.tri(descrCor)]) > .999)
+
+highlyCorDescr <- findCorrelation(descrCor, cutoff = .5)
+filteredDescr <- names(dummifieddata[,-highlyCorDescr])
+```
+
+### Receptura i rola
+
+Definicja receptury przekształceń zmiennych w modelu.
+
+```{r}
+air_rec <-
+  recipe(ozone ~., data = train_data)  |>
+  update_role(c(paste(filteredDescr)), new_role = "ID") |>
+  step_date(date, features = c("dow", "month", "quarter")) |>
+  step_holiday(date,
+              holidays = c("USInaugurationDay"),,
+               keep_original_cols = F) |>
+  step_dummy(all_nominal_predictors()) |>
+  step_zv(all_predictors())
+
+air_rec |> prep() |> bake(train_data) |> _[1:10,] |> DT::datatable()
+```
+
+### Model regresji logistycznej bez próbkowania
+
+Utworzenie modelu regresji logistycznej.
+
+```{r}
+lr_mod <- 
+  logistic_reg() |> 
+  set_engine("glm")
+```
+
+Zdefiniowanie przepływu danych w celu trenowania modelu.
+
+```{r}
+logi_work <- 
+  workflow() |> 
+  add_model(lr_mod) |> 
+  add_recipe(air_rec)
+
+logi_work
+```
+
+#### Trenowanie modelu
+
+Trenowanie modelu na danych treningowych.
+
+```{r}
+logi_fit <-  
+  logi_work |> 
+  fit(data = train_data)
+```
+
+#### Wyciągnięcie parametrów modelu
+
+Ekstrakcja parametrów dopasowanego modelu.
+
+```{r}
+logi_fit |> 
+  extract_fit_parsnip() |> 
+  tidy() |> 
+  print(n = Inf)
+
+logi_fit |> 
+  extract_fit_parsnip() |> 
+  tidy() |> 
+  select(c("term", "p.value")) |> 
+  filter(p.value >= 0.05) |> 
+  print(n = Inf)
+
+logi_fit |> 
+  extract_fit_parsnip() |> 
+  tidy() |> 
+  select(c("term", "p.value")) |> 
+  filter(p.value <= 0.05) |> 
+  print(n = Inf)
+```
+
+#### Predykcja na danych testowych
+
+Predykcja wartości na podstawie zbioru testowego.
+
+```{r}
+pred_test_lm <- 
+  augment(logi_fit, test_data)
+```
+
+#### Ocena wydajności modelu
+
+Wizualizacja krzywej ROC dla wyników predykcji.
+
+```{r}
+pred_test_lm  |> 
+  roc_curve(truth = ozone, .pred_Niskie) |> 
+  autoplot()
+
+results_lm <- pred_test_lm |> 
+  metrics(truth = ozone, estimate = .pred_class) |> 
+  bind_rows(
+    pred_test_lm |> roc_auc(truth = ozone, .pred_Niskie) |> 
+      rename(.metric = .metric, .estimate = .estimate)
+  )
+
+results_lm <- bind_rows(
+  pred_test_lm |> metrics(truth = ozone, estimate = .pred_class),
+  pred_test_lm |> roc_auc(truth = ozone, .pred_Niskie),
+  pred_test_lm |> precision(truth = ozone, estimate = .pred_class),
+  pred_test_lm |> recall(truth = ozone, estimate = .pred_class),
+  pred_test_lm |> detection_prevalence(truth = ozone, estimate = .pred_class)
+)
+
+results_lm
+```
+
+### Model regresji logistycznej z próbkowaniem
+
+Utworzenie modelu regresji logistycznej z próbkowaniem i dostosowanie hiperparametrów.
+
+```{r}
+set.seed(456)
+
+logi_fit_rs <- 
+  logi_work |> 
+  fit_resamples(
+    resamples = folds,
+    control = control_resamples(save_pred = TRUE, save_workflow = TRUE)
+  ) |> 
+  fit_best()
+
+pred_test_lm_rs <- 
+  augment(logi_fit_rs, test_data)
+
+pred_test_lm_rs  |> 
+  roc_curve(truth = ozone, .pred_Niskie) |> 
+  autoplot()
+
+results_lm_rs <- pred_test_lm_rs |> 
+  metrics(truth = ozone, estimate = .pred_class) |> 
+  bind_rows(
+    pred_test_lm_rs |> roc_auc(truth = ozone, .pred_Niskie) |> 
+      rename(.metric = .metric, .estimate = .estimate)
+  )
+
+results_lm_rs <- bind_rows(
+  pred_test_lm_rs |> metrics(truth = ozone, estimate = .pred_class),
+  pred_test_lm_rs |> roc_auc(truth = ozone, .pred_Niskie),
+  pred_test_lm_rs |> precision(truth = ozone, estimate = .pred_class),
+  pred_test_lm_rs |> recall(truth = ozone, estimate = .pred_class),
+  pred_test_lm_rs |> detection_prevalence(truth = ozone, estimate = .pred_class)
+)
+
+results_lm_rs
+```
+
+## Budowa modelu lasu losowego
+
+```{r}
+library(ranger)
+library(modeldata)
+library(tidymodels)
+tidymodels_prefer()
+
+table(train_data$ozone)
+```
+
+### Model lasu losowego bez próbkowania
+
+```{r}
+rf_mod <- 
+  rand_forest() |> 
+  set_engine("ranger") |> 
+  set_mode("classification")
+
+rf_workflow <- 
+  workflow() |> 
+  add_model(rf_mod) |> 
+  add_formula(ozone ~ .)
+```
+
+#### Trenowanie modelu
+
+```{r}
+set.seed(234)
+rf_fit <- 
+  rf_mod |> 
+  fit(ozone ~ ., data = train_data)
+rf_fit
+```
+
+#### Predykcja na danych testowych
+
+```{r}
+pred_test_rf <- 
+  augment(rf_fit, test_data)
+```
+
+#### Ocena wydajności modelu
+
+```{r}
+
+pred_test_rf  |> 
+  roc_curve(truth = ozone, .pred_Niskie) |> 
+  autoplot()
+
+results_rf <- pred_test_rf |> 
+  metrics(truth = ozone, estimate = .pred_class) |> 
+  bind_rows(
+    pred_test_rf |> roc_auc(truth = ozone, .pred_Niskie) |> 
+      rename(.metric = .metric, .estimate = .estimate)
+  )
+
+results_rf <- bind_rows(
+  pred_test_rf |> metrics(truth = ozone, estimate = .pred_class),
+  pred_test_rf |> roc_auc(truth = ozone, .pred_Niskie),
+  pred_test_rf |> precision(truth = ozone, estimate = .pred_class),
+  pred_test_rf |> recall(truth = ozone, estimate = .pred_class),
+  pred_test_rf |> detection_prevalence(truth = ozone, estimate = .pred_class)
+)
+
+results_rf
+
+```
+
+### Model lasu losowego z próbkowaniem
+
+#### Trenowanie modelu
+
+```{r}
+set.seed(235)
+
+rf_fit_rs <- 
+  rf_workflow |> 
+  fit_resamples(folds)
+
+best_rf <- select_best(rf_fit_rs, metric = "accuracy")
+final_rf_workflow <- finalize_workflow(rf_workflow, best_rf)
+final_rf_fit <- fit(final_rf_workflow, data = train_data)
+```
+
+#### Predykcja na danych testowych
+
+```{r}
+pred_test_rf_rs <- 
+  augment(final_rf_fit, test_data)
+```
+
+#### Ocena wydajności modelu
+
+```{r}
+pred_test_rf_rs  |> 
+  roc_curve(truth = ozone, .pred_Niskie) |> 
+  autoplot()
+
+results_rf_rs <- pred_test_rf_rs |> 
+  metrics(truth = ozone, estimate = .pred_class) |> 
+  bind_rows(
+    pred_test_rf_rs |> roc_auc(truth = ozone, .pred_Niskie) |> 
+      rename(.metric = .metric, .estimate = .estimate)
+  )
+
+results_rf_rs <- bind_rows(
+  pred_test_rf_rs |> metrics(truth = ozone, estimate = .pred_class),
+  pred_test_rf_rs |> roc_auc(truth = ozone, .pred_Niskie),
+  pred_test_rf_rs |> precision(truth = ozone, estimate = .pred_class),
+  pred_test_rf_rs |> recall(truth = ozone, estimate = .pred_class),
+  pred_test_rf_rs |> detection_prevalence(truth = ozone, estimate = .pred_class)
+)
+
+results_rf_rs
+
+```
+
+## Porównanie wydajności modeli
+
+```{r}
+combined_results <- results_lm |> 
+  rename(estimate_lm = .estimate) |>
+  left_join(results_lm_rs |> rename(estimate_lm_rs = .estimate), by = ".metric") |>
+  left_join(results_rf |> rename(estimate_rf = .estimate), by = ".metric") |>
+  left_join(results_rf_rs |> rename(estimate_rf_rs = .estimate), by = ".metric") |>
+  select(.metric, estimate_lm, estimate_lm_rs, estimate_rf, estimate_rf_rs)
+
+combined_results <- combined_results |> 
+  mutate(best_algorithm = case_when(
+    estimate_lm == pmax(estimate_lm, estimate_lm_rs, estimate_rf, estimate_rf_rs) ~ "LM",
+    estimate_lm_rs == pmax(estimate_lm, estimate_lm_rs, estimate_rf, estimate_rf_rs) ~ "LM (resampled)",
+    estimate_rf == pmax(estimate_lm, estimate_lm_rs, estimate_rf, estimate_rf_rs) ~ "RF",
+    estimate_rf_rs == pmax(estimate_lm, estimate_lm_rs, estimate_rf, estimate_rf_rs) ~ "RF (resampled)"
+  ))
+
+combined_results
+```
+
