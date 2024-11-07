@@ -48,7 +48,7 @@ execute:
 
 PackageNames <- c("dplyr", "tidymodels", "parsnip", "readr", "broom.mixed", "dotwhisker", 
                   "rstanarm", "GGally", "openair", "skimr", "nycflights13", "ggpubr", 
-                  "leaps", "MASS")
+                  "leaps", "MASS", "caret", "forcats", "ranger", "modeldata", "tidymodels")
 
 install_if_missing <- function(pkg) {
   if (!requireNamespace(pkg, quietly = TRUE)) {
@@ -61,7 +61,6 @@ lapply(PackageNames, library, character.only = TRUE)
 
 tidymodels_prefer()
 Sys.setenv(LANG = "en")
-
 ```
 
 ### Sprawdzenie opisu danych
@@ -160,9 +159,6 @@ folds_boot_t5 <- bootstraps(data = train_data, times = 5)
 Przy pomocy biblioteki caret zidentyfikowano w zestawie silnie skorelowane między sobą zmienne, za punkt odcięcia uznając wartość bezwzględną korelacji na poziomie 0.5 lub wyższym. Zmienne te zostaną na etapie tworzenia receptury zdefiniowane jako kolumny typu "ID".
 
 ```{r}
-library(caret)
-library(forcats)
-
 dummifieddata <- air |> 
   mutate(date = as.numeric(date)) |> 
   select(-c(date, ozone))
@@ -272,69 +268,57 @@ results_lm <- pred_test_lm |>
   bind_rows(
     pred_test_lm |> roc_auc(truth = ozone, .pred_Niskie) |> 
       rename(.metric = .metric, .estimate = .estimate)
-  )
-
-results_lm <- bind_rows(
-  pred_test_lm |> metrics(truth = ozone, estimate = .pred_class),
-  pred_test_lm |> roc_auc(truth = ozone, .pred_Niskie),
-  pred_test_lm |> precision(truth = ozone, estimate = .pred_class),
-  pred_test_lm |> recall(truth = ozone, estimate = .pred_class),
-  pred_test_lm |> detection_prevalence(truth = ozone, estimate = .pred_class)
-)
+  ) |>
+  mutate(resampling_method = "Brak",
+         model = "Regresja Logistyczna")
 
 results_lm
 ```
 
-### Model regresji logistycznej z próbkowaniem
-
-Utworzenie modelu regresji logistycznej z próbkowaniem i dostosowanie hiperparametrów.
+### Dostrajanie hiperparametrów modeli regresji logistycznej z próbkowaniem i kalkulacja podstawowych metryk
 
 ```{r}
 set.seed(456)
 
-logi_fit_rs <- 
+# folds_cv_v10
+lr_fit_cv_v10 <- 
   logi_work |> 
-  fit_resamples(
-    resamples = folds,
-    control = control_resamples(save_pred = TRUE, save_workflow = TRUE)
-  ) |> 
-  fit_best()
+  fit_resamples(folds_cv_v10)
 
-pred_test_lm_rs <- 
-  augment(logi_fit_rs, test_data)
+metrics_lr_cv_v10 <- lr_fit_cv_v10 |> 
+  collect_metrics() |> 
+  filter(.metric %in% c("accuracy", "roc_auc")) |>
+  mutate(resampling_method = "10-krotna Walidacja Krzyżowa",
+         model = "Regresja Logistyczna") |> 
+  rename(.estimate = mean)
 
-pred_test_lm_rs  |> 
-  roc_curve(truth = ozone, .pred_Niskie) |> 
-  autoplot()
+# folds_cv_v10_r5
+lr_fit_cv_v10_r5 <- 
+  logi_work |> 
+  fit_resamples(folds_cv_v10_r5)
 
-results_lm_rs <- pred_test_lm_rs |> 
-  metrics(truth = ozone, estimate = .pred_class) |> 
-  bind_rows(
-    pred_test_lm_rs |> roc_auc(truth = ozone, .pred_Niskie) |> 
-      rename(.metric = .metric, .estimate = .estimate)
-  )
+metrics_lr_cv_v10_r5 <- lr_fit_cv_v10_r5 |> 
+  collect_metrics() |> 
+  filter(.metric %in% c("accuracy", "roc_auc")) |>
+  mutate(resampling_method = "10-krotna Walidacja Krzyżowa, 5 powtórzeń",
+         model = "Regresja Logistyczna") |> 
+  rename(.estimate = mean)
 
-results_lm_rs <- bind_rows(
-  pred_test_lm_rs |> metrics(truth = ozone, estimate = .pred_class),
-  pred_test_lm_rs |> roc_auc(truth = ozone, .pred_Niskie),
-  pred_test_lm_rs |> precision(truth = ozone, estimate = .pred_class),
-  pred_test_lm_rs |> recall(truth = ozone, estimate = .pred_class),
-  pred_test_lm_rs |> detection_prevalence(truth = ozone, estimate = .pred_class)
-)
+# folds_boot_t5
+lr_fit_boot_t5 <- 
+  logi_work |> 
+  fit_resamples(folds_boot_t5)
 
-results_lm_rs
+metrics_lr_boot_t5 <- lr_fit_boot_t5 |> 
+  collect_metrics() |> 
+  filter(.metric %in% c("accuracy", "roc_auc")) |>
+  mutate(resampling_method = "Bootstrap, 5-krotne próbkowanie wtórne",
+         model = "Regresja Logistyczna") |> 
+  rename(.estimate = mean)
+
 ```
 
 ## Budowa modelu lasu losowego
-
-```{r}
-library(ranger)
-library(modeldata)
-library(tidymodels)
-tidymodels_prefer()
-
-table(train_data$ozone)
-```
 
 ### Model lasu losowego bez próbkowania
 
@@ -380,86 +364,72 @@ results_rf <- pred_test_rf |>
   bind_rows(
     pred_test_rf |> roc_auc(truth = ozone, .pred_Niskie) |> 
       rename(.metric = .metric, .estimate = .estimate)
-  )
-
-results_rf <- bind_rows(
-  pred_test_rf |> metrics(truth = ozone, estimate = .pred_class),
-  pred_test_rf |> roc_auc(truth = ozone, .pred_Niskie),
-  pred_test_rf |> precision(truth = ozone, estimate = .pred_class),
-  pred_test_rf |> recall(truth = ozone, estimate = .pred_class),
-  pred_test_rf |> detection_prevalence(truth = ozone, estimate = .pred_class)
-)
-
-results_rf
+  ) |>
+  mutate(resampling_method = "Brak",
+         model = "Drzewo Decyzyjne")
 
 ```
 
-### Model lasu losowego z próbkowaniem
-
-#### Trenowanie modelu
+### Dostrajanie hiperparametrów modeli regresji logistycznej z próbkowaniem i kalkulacja podstawowych metryk
 
 ```{r}
 set.seed(235)
 
-rf_fit_rs <- 
+# folds_cv_v10
+rf_fit_cv_v10 <- 
   rf_workflow |> 
-  fit_resamples(folds)
+  fit_resamples(folds_cv_v10)
 
-best_rf <- select_best(rf_fit_rs, metric = "accuracy")
-final_rf_workflow <- finalize_workflow(rf_workflow, best_rf)
-final_rf_fit <- fit(final_rf_workflow, data = train_data)
-```
+metrics_rf_cv_v10 <- rf_fit_cv_v10 |> 
+  collect_metrics() |> 
+  filter(.metric %in% c("accuracy", "roc_auc")) |>
+  mutate(resampling_method = "10-krotna Walidacja Krzyżowa",
+         model = "Drzewo Decyzyjne") |> 
+  rename(.estimate = mean)
 
-#### Predykcja na danych testowych
+# folds_cv_v10_r5
+rf_fit_cv_v10_r5 <- 
+  rf_workflow |> 
+  fit_resamples(folds_cv_v10_r5)
 
-```{r}
-pred_test_rf_rs <- 
-  augment(final_rf_fit, test_data)
-```
+metrics_rf_cv_v10_r5 <- rf_fit_cv_v10_r5 |> 
+  collect_metrics() |> 
+  filter(.metric %in% c("accuracy", "roc_auc")) |>
+  mutate(resampling_method = "10-krotna Walidacja Krzyżowa, 5 powtórzeń",
+         model = "Drzewo Decyzyjne") |> 
+  rename(.estimate = mean)
 
-#### Ocena wydajności modelu
+# folds_boot_t5
+rf_fit_boot_t5 <- 
+  rf_workflow |> 
+  fit_resamples(folds_boot_t5)
 
-```{r}
-pred_test_rf_rs  |> 
-  roc_curve(truth = ozone, .pred_Niskie) |> 
-  autoplot()
-
-results_rf_rs <- pred_test_rf_rs |> 
-  metrics(truth = ozone, estimate = .pred_class) |> 
-  bind_rows(
-    pred_test_rf_rs |> roc_auc(truth = ozone, .pred_Niskie) |> 
-      rename(.metric = .metric, .estimate = .estimate)
-  )
-
-results_rf_rs <- bind_rows(
-  pred_test_rf_rs |> metrics(truth = ozone, estimate = .pred_class),
-  pred_test_rf_rs |> roc_auc(truth = ozone, .pred_Niskie),
-  pred_test_rf_rs |> precision(truth = ozone, estimate = .pred_class),
-  pred_test_rf_rs |> recall(truth = ozone, estimate = .pred_class),
-  pred_test_rf_rs |> detection_prevalence(truth = ozone, estimate = .pred_class)
-)
-
-results_rf_rs
-
+metrics_rf_boot_t5 <- rf_fit_boot_t5 |> 
+  collect_metrics() |> 
+  filter(.metric %in% c("accuracy", "roc_auc")) |>
+  mutate(resampling_method = "Bootstrap, 5-krotne próbkowanie wtórne",
+         model = "Drzewo Decyzyjne") |> 
+  rename(.estimate = mean)
 ```
 
 ## Porównanie wydajności modeli
 
-```{r}
-combined_results <- results_lm |> 
-  rename(estimate_lm = .estimate) |>
-  left_join(results_lm_rs |> rename(estimate_lm_rs = .estimate), by = ".metric") |>
-  left_join(results_rf |> rename(estimate_rf = .estimate), by = ".metric") |>
-  left_join(results_rf_rs |> rename(estimate_rf_rs = .estimate), by = ".metric") |>
-  select(.metric, estimate_lm, estimate_lm_rs, estimate_rf, estimate_rf_rs)
+Z porównania modeli drzewa decyzyjnego i regresji logistycznej z trzema rodzajami próbkowania losowego wynika, że najlepszm wyniki pod kątem metryki roc_auc osiągają modele oparte na drzewie decyzyjnym. Pierwsze miejsce zajął model z 10-krotną walidacją krzyżową, olejne miejsca zajmują kolejno 10-krotna walidacja krzyżowa z pięcioma powtórzeniami oraz bootstrapping z pięciokrotnym próbkowaniem wtórnym. Najlepszym modelem bez próbkowania losowego okazało się również drzewo decyzyjne. 
 
-combined_results <- combined_results |> 
-  mutate(best_algorithm = case_when(
-    estimate_lm == pmax(estimate_lm, estimate_lm_rs, estimate_rf, estimate_rf_rs) ~ "LM",
-    estimate_lm_rs == pmax(estimate_lm, estimate_lm_rs, estimate_rf, estimate_rf_rs) ~ "LM (resampled)",
-    estimate_rf == pmax(estimate_lm, estimate_lm_rs, estimate_rf, estimate_rf_rs) ~ "RF",
-    estimate_rf_rs == pmax(estimate_lm, estimate_lm_rs, estimate_rf, estimate_rf_rs) ~ "RF (resampled)"
-  ))
+```{r}
+
+combined_results <- results_lm |> 
+  bind_rows(metrics_lr_cv_v10, 
+            metrics_lr_cv_v10_r5, 
+            metrics_lr_boot_t5,
+            results_rf,
+            metrics_rf_cv_v10,
+            metrics_rf_cv_v10_r5,
+            metrics_rf_boot_t5) |> 
+  select(model, resampling_method, .metric, .estimate) |> 
+  filter(.metric %in% c("roc_auc", "accuracy")) |> 
+  group_by(.metric) |> 
+  arrange(desc(.estimate))
 
 combined_results
 ```

@@ -430,5 +430,46 @@ combined_results
 
 ```{r}
 
+tune_spec <- 
+  rand_forest(mtry = tune(),
+              min_n = tune(),
+              trees = 1000) |>
+  set_engine(engine = "ranger",
+  num.threads=parallel::detectCores() - 1,
+  importance = "impurity") |> 
+  set_mode("classification")
+
+rf_mod <-
+  rand_forest() |> 
+  set_engine(engine = "ranger",
+  num.threads = parallel::detectCores() - 1) |> 
+  set_mode("classification")
+
+ozone_rf_work <- 
+  workflow() |> 
+  add_model(rf_mod) |> 
+  add_recipe(ozone_recipe)
+
+tune_work  <- 
+  workflow() |> 
+  add_model(tune_spec) |> 
+  add_recipe(ozone_recipe)
+
+examination_metrics  <- 
+  yardstick::metric_set(
+    accuracy,
+    mcc,
+    npv,
+    roc_auc
+  )
+
+tune_fit <- tune_work |> 
+  tune_grid(
+    resamples=folds,
+    grid=reg_grid,
+    metrics=examination_metrics
+  )
+tune_fit
+
 ```
 

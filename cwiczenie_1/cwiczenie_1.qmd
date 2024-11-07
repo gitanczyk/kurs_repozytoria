@@ -220,7 +220,7 @@ Jest w tym trochę prawdy. Tak metoda ma wady. Ale ...
 
 Proponuję podać zakres zastosowania modelu. Pedkość wiatru modelu zdefiniowana jest w **\[m/s\]** a nie `[km/h]`. W efekcie otrzymał pan irracjonalne wyniki dla nierealnej sytuacji.
 
-100 \[m/s\] to \`r 100 \* 3.6\` \[km/h\]  - gdzieś w środku tornada takie prędkości występują.
+100 \[m/s\] to \`r 100 \* 3.6\` \[km/h\] - gdzieś w środku tornada takie prędkości występują.
 
 ```{r}
 
