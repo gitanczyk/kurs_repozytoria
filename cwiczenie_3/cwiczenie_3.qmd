@@ -1,5 +1,5 @@
 ---
-title: "Ćwiczenie 2 (tidymodels)"
+title: "Ćwiczenie 3 (tidymodels)"
 author: "Jakub Anczyk"
 editor: visual
 editor_options: 
@@ -414,7 +414,7 @@ metrics_rf_boot_t5 <- rf_fit_boot_t5 |>
 
 ## Porównanie wydajności modeli
 
-Z porównania modeli drzewa decyzyjnego i regresji logistycznej z trzema rodzajami próbkowania losowego wynika, że najlepszm wyniki pod kątem metryki roc_auc osiągają modele oparte na drzewie decyzyjnym. Pierwsze miejsce zajął model z 10-krotną walidacją krzyżową, olejne miejsca zajmują kolejno 10-krotna walidacja krzyżowa z pięcioma powtórzeniami oraz bootstrapping z pięciokrotnym próbkowaniem wtórnym. Najlepszym modelem bez próbkowania losowego okazało się również drzewo decyzyjne. 
+Z porównania modeli drzewa decyzyjnego i regresji logistycznej z trzema rodzajami próbkowania losowego wynika, że najlepszm wyniki pod kątem metryki roc_auc osiągają modele oparte na drzewie decyzyjnym. Pierwsze miejsce zajął model z 10-krotną walidacją krzyżową, olejne miejsca zajmują kolejno 10-krotna walidacja krzyżowa z pięcioma powtórzeniami oraz bootstrapping z pięciokrotnym próbkowaniem wtórnym. Najlepszym modelem bez próbkowania losowego okazało się również drzewo decyzyjne.
 
 ```{r}
 
@@ -433,4 +433,3 @@ combined_results <- results_lm |>
 
 combined_results
 ```
-
