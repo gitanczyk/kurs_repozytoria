@@ -55,343 +55,381 @@ tidymodels_prefer()
 Sys.setenv(LANG = "en")
 ```
 
-### Załadowanie danych
+### Sprawdzenie opisu danych
+
+Pobieranie danych i ich wstępna analiza.
 
 ```{r}
-hotele <- 
-  read_csv(file = "https://tidymodels.org/start/case-study/hotels.csv") |>  
-  mutate_if(is.character, as.factor)  
-
-hotele |> dim()
+air <- mydata |> selectByDate(year = 2002) |> na.omit()
+air |> skim()
+range(air$wd)
 ```
 
+### Klasyfikacja wartości ozonu oraz kierunku wiatru
+
 ```{r}
-hotele |> glimpse()
+wind_dir_names <- c("N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW")
+
+air <-
+  air |> 
+  na.omit(wind_direction) |>
+  mutate(wind_direction = 
+           cut(wd, 
+               breaks = seq(0, 360, length.out = 17), 
+               labels = wind_dir_names, 
+               include.lowest = TRUE, 
+               right = FALSE)) |>
+  select(-c(wd))
 ```
 
+### Podział danych
+
+Podział danych na zbiór treningowy i testowy.
 
 ```{r}
-hotele |>    
-  count(children) |>    
-  mutate(prop = n/sum(n)) |>    
-  gt::gt() |>    
-  gt::tab_header(title = "Zmienna objaśniana")
+set.seed(222)
+
+data_split <- initial_split(data = air,
+                            prop = 3 / 4,
+                            strata = o3)
+
+train_data <- training(data_split)
+test_data <- testing(data_split)
+
+val_set <- validation_split(data = train_data,
+                            prop = 3 / 4,
+                            strata = o3)
+
 ```
 
+## Wybór istotnych zmiennych metodą Hellwiga
+
+## Obliczenie ilości kombinacji zmiennych
 
 ```{r}
-set.seed(123)
-
-splits <-
-  initial_split(data = hotele,
-                prop = 3 / 4,
-                strata = "children")
-
-hotel_other <- training(splits)
-hotel_test <- testing(splits)
+(kombinacje <- (2^length(setdiff(names(air %>% select(-date)), "o3"))) - 1)
 ```
 
+## Algorytm Hellwiga
+
+Implementacja algorytmu Hellwiga dla wyboru najlepszego modelu predykcyjnego.
 
 ```{r}
-hotel_other |>    
-  count(children) |>    
-  mutate(prop = n/sum(n)) 
-```
 
-
-```{r}
-hotel_test |>    
-  count(children) |>    
-  mutate(prop = n/sum(n))
-```
-
-
-
-```{r}
-set.seed(234)  
-val_set <-
-  validation_split(data = hotel_other,
-                   prop = 3 / 4,
-                   strata = "children") 
-
-val_set
-```
-
-
-```{r}
-lr_mod <-
-  logistic_reg(penalty = tune(),
-               mixture = 1) |>
-  set_engine(engine = "glmnet") |>
-  set_mode("classification")
-```
-
-```{r}
-holidays <-
-  c(
-    "AllSouls",
-    "AshWednesday",
-    "ChristmasEve",
-    "Easter",
-    "ChristmasDay",
-    "GoodFriday",
-    "NewYearsDay",
-    "PalmSunday"
+hellwig <- function(y, x, method = "pearson") {
+  requireNamespace("utils")
+  x <- x[sapply(x, is.numeric)]  # Ensure only numeric predictors
+  x <- as.data.frame(x)  # Convert to data frame
+  
+  # Calculate correlation matrix
+  cm <- stats::cor(x, method = method)  # Correlations between predictors
+  cd <- stats::cor(x, y, method = method)  # Correlation between predictors and target
+  
+  # Generate all subsets of the predictors
+  k <- sapply(seq(2, ncol(x)), function(i) utils::combn(ncol(x), i, simplify = FALSE))
+  k <- do.call("c", k)
+  
+  # Hellwig function to calculate score for a subset
+  hfun <- function(v) {
+    sapply(v, function(i) cd[i]^2 / sum(abs(cm[v, i])))
+  }
+  
+  # Store all combinations and their respective scores
+  all_combinations <- lapply(k, function(comb) {
+    score <- sum(hfun(comb))
+    list(combination = paste(names(x)[comb], collapse = "-"), score = score)
+  })
+  
+  # Convert to data frame for easy viewing
+  all_combinations_df <- data.frame(
+    combination = sapply(all_combinations, `[[`, "combination"),
+    score = sapply(all_combinations, `[[`, "score"),
+    stringsAsFactors = FALSE
   )
+  
+  # Return the data frame of all combinations and their scores
+  return(all_combinations_df)
+}
 
-lr_recipe <-    
-  recipe(children ~ ., data = hotel_other) |>    
-  step_date(arrival_date) |>    
-  step_holiday(arrival_date, holidays = holidays) |>    
-  step_rm(arrival_date) |>    
-  step_dummy(all_nominal_predictors()) |>    
-  step_zv(all_predictors()) |>    
-  step_normalize(all_predictors())
+target_var <- c("o3")
+predictor_sets <- setdiff(names(air %>% select(-date)), target_var)
+
+predictor_data <- air[, predictor_sets]
+target_data <- air[[target_var]]
+
+all_models <- hellwig(target_data, predictor_data, method = "pearson")
+best_variables <- unlist(unique(flatten(strsplit(all_models[1:3,]$combination, '-'))))
+best_variables
+
+rejected_predictors <- setdiff(names(air %>% select(-c(date, o3, wind_direction))), best_variables)
+rejected_predictors
+
+best_model <- all_models |> slice(which.max(score))
+best_model
+
 ```
 
+## Definicja modeli regresyjnych
+
+### Model regresji liniowej
+
 ```{r}
-lr_recipe |> prep() |> bake(hotel_other) |> glimpse()
+lr_mod <- 
+  linear_reg(penalty = tune(), mixture = tune()) |>
+  set_engine(engine = "glmnet", num.threads = parallel::detectCores() - 1) |> 
+  set_mode("regression")
+
+lr_workflow <- 
+  workflow() |> 
+  add_model(lr_mod) |> 
+  add_formula(o3 ~ .)
 ```
 
+### Model lasu losowego
+
 ```{r}
-lr_workflow <-    
-  workflow() |>    
-  add_model(lr_mod) |>    
-  add_recipe(lr_recipe)
+rf_mod <- 
+  rand_forest(mtry = tune(), trees = tune(), min_n = tune()) |> 
+  set_engine("ranger") |> 
+  set_mode("regression")
+
+rf_workflow <- 
+  workflow() |> 
+  add_model(rf_mod) |> 
+  add_formula(o3 ~ .)
 ```
 
-```{r}
-# automat 
-lr_grid <- grid_regular(penalty(), levels = 30)  
+### Model drzewa decyzyjnego
 
-# manualnie 
-lr_grid <- tibble(penalty = 10^seq(-4, -1, length.out = 30))
+```{r}
+dt_mod <- 
+  decision_tree(cost_complexity = tune(), tree_depth = tune(), min_n = tune()) |> 
+  set_engine("rpart") |> 
+  set_mode("regression")
+
+dt_workflow <- 
+  workflow() |> 
+  add_model(dt_mod) |> 
+  add_formula(o3 ~ .)
 ```
 
+## Receptury i role
+
 ```{r}
+air_rec <-
+  recipe(o3 ~., data = train_data)  |>
+  update_role(c(paste(rejected_predictors)), new_role = "ID") |>
+  step_date(date, features = c("dow", "month", "quarter")) |> 
+  step_time(date, features = c("hour")) |>
+  step_holiday(date,
+               holidays = c("USInaugurationDay"),
+               keep_original_cols = F) |>
+  step_dummy(all_nominal_predictors()) |>
+  step_zv(all_predictors()) |>
+  step_impute_knn(all_predictors()) |>
+  step_corr(all_predictors(), threshold = 0.7)
+
+```
+
+## Trenowanie modeli
+
+### Trenowanie modelu regresji liniowej
+
+```{r}
+#| eval: false
+lr_workflow <-
+  workflow() |>
+  add_model(lr_mod) |>
+  add_recipe(air_rec)
+
+lr_grid <-
+  grid_regular(penalty(), mixture(), levels = 5)
+
 lr_res <-
   lr_workflow |>
   tune_grid(
     resamples = val_set,
     grid = lr_grid,
     control = control_grid(save_pred = TRUE),
-    metrics = metric_set(roc_auc)
+    metrics = metric_set(mae)
   )
-```
 
-```{r}
-library(ggthemes)
-
-lr_plot <-
-  lr_res |>
-  collect_metrics() |>
-  ggplot(aes(penalty, mean)) +
-  geom_point(size = 2) +
-  geom_line(linetype = 2) +
-  ylab("Pole powierzchni pod krzywa ROC") +
-  scale_x_log10() +
-  geom_text(aes(
-    x = penalty,
-    y = mean + 0.03,
-    label = .config |> stringr::str_sub(20, 21)
-  )) + 
-  ggdark::dark_theme_dark()
-
-lr_plot
-```
-
-```{r}
-top_models <- 
-  lr_res |> 
-  show_best("roc_auc", n = 15) |> 
-  arrange(penalty) |> 
-  mutate(mean = mean |> round(x = _, digits = 3))
-
-top_models |> gt::gt()
-```
-
-```{r}
-lr_plot +
-  geom_vline(
-    xintercept = c(0.000853, 0.00221),
-    linetype = 4,
-    size = 1,
-    color = "black"
-  ) + 
-  ggtitle("Modele o tej samej skutecznosci (roc_auc = 0.877)")
-```
-
-```{r}
-lr_best <- 
-  lr_res |> 
-  collect_metrics() |> 
-  arrange(penalty) |> 
-  slice(15)
-
+lr_best <- select_best(lr_res, metric = "mae")
 lr_best
 ```
 
-```{r}
-lr_auc <- 
-  lr_res %>% 
-  collect_predictions(parameters = lr_best) %>% 
-  roc_curve(children, .pred_children) %>% 
-  mutate(model = "Logistic Regression")
-
-autoplot(lr_auc) +
-  ggdark::dark_theme_dark()
-```
+### Trenowanie modelu lasu losowego
 
 ```{r}
-cores <- parallel::detectCores()
-cores
-```
+#| eval: false
+rf_workflow <-
+  workflow() |>
+  add_model(rf_mod) |>
+  add_recipe(air_rec)
 
-```{r}
-tidymodels_prefer()
+rf_grid <-
+  grid_regular(mtry(range = c(1, 5)), trees(), min_n(), levels = 5)
 
-rf_mod <-
-  rand_forest(mtry = tune(),
-              min_n = tune(),
-              trees = 1000) |>
-  set_engine(engine = "ranger",
-             num.threads = cores - 1) |>
-  set_mode(mode = "classification")
-```
+rf_res <-
+  rf_workflow |>
+  tune_grid(
+    resamples = val_set,
+    grid = rf_grid,
+    control = control_grid(save_pred = TRUE),
+    metrics = metric_set(mae),
+    importance = "impurity"
+  )
 
-```{r}
-rf_recipe <- 
-  recipe(children ~ ., data = hotel_other) |> 
-  step_date(arrival_date) |> 
-  step_holiday(holidays = holidays) |> 
-  step_rm(arrival_date)
-```
-
-```{r}
-rf_workflow <- 
-  workflow() |> 
-  add_model(rf_mod) |> 
-  add_recipe(rf_recipe)
-```
-
-```{r}
-rf_mod
-extract_parameter_set_dials(rf_mod)
-```
-
-```{r}
-set.seed(345)
-rf_res <- 
-  rf_workflow |> 
-  tune_grid(resamples = val_set, 
-            grid = 25, 
-            control = control_grid(save_pred = T),
-            metrics = metric_set(roc_auc))
-```
-
-```{r}
-rf_res |> show_best(n = 5)
-```
-
-```{r}
-autoplot(rf_res) + 
-  geom_line() + 
-  geom_point(size = 2) + 
-  ggdark:::dark_theme_dark()
-```
-
-```{r}
-rf_best <- 
-  rf_res |> select_best()
+rf_best <- select_best(rf_res, metric = "mae")
 rf_best
 ```
 
-```{r}
-rf_auc <-
-  rf_res |>
-  collect_predictions(parameters = rf_best) |>
-  roc_curve(children, .pred_children) |>
-  mutate(model = "Random Forest")
+### Trenowanie modelu drzewa decyzyjnego
 
-rf_auc |> 
-  autoplot() + 
-  ggdark::dark_theme_dark()
+```{r}
+#| eval: false
+dt_workflow <-
+  workflow() |>
+  add_model(dt_mod) |>
+  add_recipe(air_rec)
+
+dt_grid <-
+  grid_regular(cost_complexity(), tree_depth(), min_n(), levels = 5)
+
+dt_res <-
+  dt_workflow |>
+  tune_grid(
+    resamples = val_set,
+    grid = dt_grid,
+    control = control_grid(save_pred = TRUE),
+    metrics = metric_set(mae)
+  )
+
+dt_best <- select_best(dt_res, metric = "mae")
+dt_best
 ```
 
 ```{r}
-bind_rows(lr_auc,rf_auc) |> 
-  ggplot(aes(x = 1 - specificity, y = sensitivity, col = model)) +
-  geom_path(lwd = 1.5) +
-  geom_abline(lty = 3) + 
-  coord_equal() +
-  scale_color_manual(values = c("black", "white")) +
-  ggdark::dark_theme_dark()
+#| eval: false
+save(lr_res, rf_res, dt_res, lr_best, rf_best, dt_best, file = "cwiczenie_6_data.RData")
 ```
 
 ```{r}
-rf_best
+#| eval: true
+load(file = "cwiczenie_6_data.RData")
+
+lr_best <- select_best(lr_res, metric = "mae")
+rf_best <- select_best(rf_res, metric = "mae")
+dt_best <- select_best(dt_res, metric = "mae")
 ```
+
+## Wybór najlepszych modeli i dopasowanie hiperparametrów
+
+### Model regresji liniowej
 
 ```{r}
-last_rf_mod <- 
-  rand_forest(mtry = 8, min_n = 12, trees = 1000) |> 
-  set_engine("ranger", num.threads = cores-2, importance = "impurity") |> 
-  set_mode("classification")
+lr_res |>
+  show_best(metric = "mae", n = Inf) |>
+  arrange(desc(mean)) |> 
+  filter(mean > quantile(mean, 0.90))
 
-last_rf_work <- 
-  rf_workflow |> 
-  update_model(last_rf_mod)
+lr_res |>
+    select_best(metric = "mae")
 
-set.seed(345)
-last_rf_fit <- 
-  last_rf_work |> 
-  last_fit(split = splits)
+lr_res |>
+    show_best(metric = "mae", n = Inf) |>
+    filter(.config == lr_best$.config)
 
-last_rf_fit
+lr_best_fin_mod <-
+    lr_workflow |>
+    finalize_workflow(lr_best)
+
+lr_fit <-
+    lr_best_fin_mod |>
+    last_fit(split = data_split)
 ```
+
+### Model lasu losowego
 
 ```{r}
-last_rf_fit |> 
-  collect_metrics()
+rf_res |>
+  show_best(metric = "mae", n = Inf) |>
+  arrange(desc(mean)) |> 
+  filter(mean > quantile(mean, 0.90))
+
+rf_res |>
+    select_best(metric = "mae")
+
+rf_res |>
+    show_best(metric = "mae", n = Inf) |>
+    filter(.config == rf_best$.config)
+
+rf_best_fin_mod <-
+    rf_workflow |>
+    finalize_workflow(rf_best)
+
+rf_fit <-
+    rf_best_fin_mod |>
+    last_fit(split = data_split)
 ```
+
+### Model drzewa decyzyjnego
 
 ```{r}
-last_rf_fit |> 
-  extract_fit_parsnip() |> 
-  vip(num_features = 20) +
-  scale_x_discrete(expand = c(0,0)) +
-  scale_y_continuous(expand = c(0,0)) +
-  geom_boxplot(color = "black", fill = "grey85") +
-  ggdark::dark_theme_dark()
+dt_res |>
+  show_best(metric = "mae", n = Inf) |>
+  arrange(desc(mean))
+
+dt_res |>
+    select_best(metric = "mae")
+
+dt_res |>
+    show_best(metric = "mae", n = Inf) |>
+    filter(.config == dt_best$.config)
+
+dt_best_fin_mod <-
+    dt_workflow |>
+    finalize_workflow(dt_best)
+
+dt_fit <-
+    dt_best_fin_mod |>
+    last_fit(split = data_split)
 ```
 
-```{r}
-last_rf_fit |> 
-  collect_predictions() |> 
-  roc_curve(children, .pred_children) |> 
-  autoplot() +
-  ggdark::dark_theme_dark()
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
+## Wybór najlepszego z modeli
 
 ```{r}
 
+lr_metrics <- 
+  lr_fit |> 
+  collect_metrics() |> 
+  select(-.config) |> 
+  mutate(model = "Regresja Liniowa")
+
+ft_metrics <- 
+  dt_fit |> 
+  collect_metrics() |> 
+  select(-.config) |> 
+  mutate(model = "Drzewo Decyzyjne")
+
+rf_metrics <- 
+  rf_fit |> 
+  collect_metrics() |> 
+  select(-.config) |> 
+  mutate(model = "Las Losowy")
 ```
+
+Najlepszym z modeli pod względem RMSE i statystyki R-kwadrat jest Las Losowy.
 
 ```{r}
+(best_rmse <- 
+  bind_rows(lr_metrics, ft_metrics, rf_metrics) |> 
+  filter(.metric == "rmse")) |> 
+  arrange((.estimate))
+
+(best_rsq <- 
+  bind_rows(lr_metrics, ft_metrics, rf_metrics) |> 
+  filter(.metric == "rsq")) |> 
+  arrange(desc(.estimate))
 
 ```
-
-
-
-
-
-
-
